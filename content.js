@@ -1,4 +1,4 @@
-/* Read Aloud Player — content script
+/* Web-AI-audio — content script
  * 1. Injects a speaker button into playable assistant text response action rows.
  * 2. Clicking it triggers the site's native "Read Aloud" (directly or via the overflow menu).
  * 3. Hijacks the native <audio> element and routes control to a floating, draggable media panel.

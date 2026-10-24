@@ -1,4 +1,4 @@
-# Read Aloud Player
+# Web-AI-audio
 
 A Chrome extension that gives the Read Aloud feature of AI chat sites a proper player: one-click access from every reply, and a floating controller with scrubbing, skip, loop and a playback speed that sticks.
 
@@ -47,7 +47,7 @@ Beautiful floating panel with all playback controls.
 
 ### Method 2: Manual Installation
 1. Download this repository as a ZIP file
-2. Extract the ZIP to a folder (e.g., `read-aloud-player`)
+2. Extract the ZIP to a folder (e.g., `Web-AI-audio`)
 3. Open Chrome and navigate to `chrome://extensions`
 4. Enable **Developer mode** (toggle in top-right)
 5. Click **Load unpacked** and select the extracted folder
@@ -84,8 +84,8 @@ Beautiful floating panel with all playback controls.
 ### Building from Source
 ```bash
 # Clone the repository
-git clone https://github.com/ai-armageddon/read-aloud-player.git
-cd read-aloud-player
+git clone https://github.com/ai-armageddon/Web-AI-audio.git
+cd Web-AI-audio
 
 # Load in Chrome
 # 1. Open chrome://extensions
@@ -111,7 +111,7 @@ The contract is documented at the top of `sites/chatgpt.js`. Hooks that a site d
 
 ### Project Structure
 ```
-read-aloud-player/
+Web-AI-audio/
 ├── manifest.json          # Extension manifest
 ├── content.js             # Site-agnostic content script: buttons, player, settings
 ├── injector.js            # Site-agnostic MAIN-world audio hooks
@@ -174,8 +174,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Support
 
 If you encounter any issues or have questions:
-- 🐛 [Report an Issue](https://github.com/ai-armageddon/read-aloud-player/issues)
-- 💬 [Discussions](https://github.com/ai-armageddon/read-aloud-player/discussions)
+- 🐛 [Report an Issue](https://github.com/ai-armageddon/Web-AI-audio/issues)
+- 💬 [Discussions](https://github.com/ai-armageddon/Web-AI-audio/discussions)
 
 ---
 
