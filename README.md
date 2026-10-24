@@ -1,19 +1,32 @@
-# ChatGPT-web-audio
+# Read Aloud Player
 
-A Chrome extension that supercharges ChatGPT's Read Aloud feature with a beautiful floating media controller and one-click access.
+A Chrome extension that gives the Read Aloud feature of AI chat sites a proper player: one-click access from every reply, and a floating controller with scrubbing, skip, loop and a playback speed that sticks.
+
+Works on **ChatGPT** and **Grok**. Each site is a small adapter, so adding another one is a single file.
 
 ![Extension Icon](icons/icon128.png)
 
 ## Features
 
-- **One-Click Access** - Speaker button injected into assistant responses with readable text (no more digging through menus!)
-- **Floating Media Controller** - Sleek, draggable panel with full playback controls
+- **One-Click Access** - Speaker button injected into every readable assistant reply (no more digging through menus)
+- **Floating Media Controller** - Sleek, draggable panel or a micro pill centred on the chat, with full playback controls
 - **Zoom-Friendly Player** - An always-visible bottom player takes over in narrow or short windows; Play starts the latest reply when no audio is loaded
-- **Smart Audio Hijacking** - Intercepts OpenAI's native audio stream for seamless control
-- **Playback Speed Control** - Click the speed pill to cycle 1x, 1.25x, 1.5x, 1.75x, or 2x (persists across sessions)
+- **Smart Audio Hijacking** - Takes over the site's own Read Aloud stream, so the voice is the site's and the controls are yours
+- **Real Timeline While Streaming** - Works the clip's true length out from the download, so the scrubber and total time are right long before the site knows them
+- **Playback Speed Control** - Click the speed pill to cycle 1x, 1.25x, 1.5x, 1.75x, or 2x (persists across sessions and sites)
+- **Keyboard Shortcuts** - Play/pause, back 10s and forward 10s, configurable from the extension popup
 - **Position Memory** - Panel remembers where you dragged it (even after page reload)
-- **Modern UI** - Clean, glassmorphic design that follows ChatGPT's light/dark theme
+- **Modern UI** - Clean, glassmorphic design that follows the site's light/dark theme
 - **Auto-Hide** - Panel only appears when audio is playing, hides when finished
+
+## Supported sites
+
+| Site | How Read Aloud is reached | Notes |
+| --- | --- | --- |
+| ChatGPT (`chatgpt.com`) | The native Read Aloud button in the reply's action row is replaced by the speaker button | Audio is a streamed AAC clip through a MediaSource; the extension keeps a minute of history so you can rewind |
+| Grok (`grok.com`) | The speaker button opens the reply's "More actions" menu and picks Read Aloud for you | Audio is a streamed WAV file; Grok's own mini player bar is hidden while the floating player is in charge |
+
+Sites without a native Read Aloud feature on the web (Claude, for example) are out of scope: the extension drives the site's own voice rather than bringing its own.
 
 ## Screenshots
 
@@ -34,33 +47,36 @@ Beautiful floating panel with all playback controls.
 
 ### Method 2: Manual Installation
 1. Download this repository as a ZIP file
-2. Extract the ZIP to a folder (e.g., `ChatGPT-web-audio`)
+2. Extract the ZIP to a folder (e.g., `read-aloud-player`)
 3. Open Chrome and navigate to `chrome://extensions`
 4. Enable **Developer mode** (toggle in top-right)
 5. Click **Load unpacked** and select the extracted folder
-6. Navigate to `https://chatgpt.com` and enjoy!
+6. Open `https://chatgpt.com` or `https://grok.com` and enjoy!
 
 ## Usage
 
-1. **Play Audio** - Click the speaker button under any text-based ChatGPT response
+1. **Play Audio** - Click the speaker button under any text-based reply
 2. **Control Playback** - Use the floating panel to play/pause, skip, or seek
 3. **Adjust Speed** - Click the speed pill to cycle through playback speeds
 4. **Reposition Panel** - Drag the panel by its header to your preferred location
 5. **Hide Panel** - Click the × button or let it auto-hide when audio ends
+6. **Pick a Style** - Use the extension icon to switch between the floating panel and the micro pill, and to set keyboard shortcuts
 
 ## Technical Details
 
 ### How It Works
-- **Button Injection**: Uses `MutationObserver` to detect new messages and inject speaker buttons
-- **Audio Hijacking**: Intercepts OpenAI's native `<audio>` elements and routes control to custom UI
+- **Site Adapters**: Everything that depends on a site's DOM or audio pipeline lives in `sites/<site>.js`. The core scripts never name a site; they pick the adapter registered for the current hostname.
+- **Button Injection**: Uses `MutationObserver` to detect new messages and inject speaker buttons where the adapter says the action row is
+- **Audio Hijacking**: Intercepts the site's native `<audio>` elements and routes control to the custom UI
 - **Detached Audio Support**: Patches `HTMLMediaElement.play()` to capture audio objects that never enter the DOM
-- **Storage**: Uses `chrome.storage.local` to persist speed preferences and panel position
-- **Pointer Events**: Emulates real user interactions for compatibility with ChatGPT's Radix UI components
+- **Clip Length**: ChatGPT's length is counted from the ADTS frames of the synthesize download; Grok's comes from a Range request, whose `Content-Range` header reports the WAV's full size
+- **Storage**: Uses `chrome.storage.local` to persist speed, player style, shortcuts and panel position
+- **Pointer Events**: Emulates real user interactions for compatibility with the sites' Radix UI components
 
 ### Compatibility
 - ✅ Chrome 88+ (Manifest V3)
-- ✅ ChatGPT (chatgpt.com)
-- ✅ All OpenAI voice models
+- ✅ ChatGPT (chatgpt.com) and Grok (grok.com)
+- ✅ Every voice the site offers
 - ✅ Desktop and laptop browsers
 
 ## Development
@@ -68,8 +84,8 @@ Beautiful floating panel with all playback controls.
 ### Building from Source
 ```bash
 # Clone the repository
-git clone https://github.com/ai-armageddon/ChatGPT-web-audio.git
-cd ChatGPT-web-audio
+git clone https://github.com/ai-armageddon/read-aloud-player.git
+cd read-aloud-player
 
 # Load in Chrome
 # 1. Open chrome://extensions
@@ -77,23 +93,38 @@ cd ChatGPT-web-audio
 # 3. Click "Load unpacked" and select this folder
 ```
 
+### Tests
+```bash
+npm test
+```
+The suite runs on Node's built-in test runner with no dependencies. It loads the site adapters exactly as the browser does and checks their pure logic: host resolution, the ADTS and WAV length parsers, the Grok Range probe against a mocked fetch, and which reply a clip belongs to.
+
 ### Versioning
 The version in `manifest.json` follows the commit count: the minor number goes up by one every 3 commits, and the patch number counts the commits in between (commit 15 is `0.5.0`, commit 16 is `0.5.1`). Run `node version.js` before committing to set it.
 
+### Adding a site
+1. Copy `sites/grok.js` (or `sites/chatgpt.js`, whichever is closer) to `sites/<site>.js` and fill in the adapter: host names, how to find a reply's action row and its text, how to reach the native Read Aloud control, and, in the `page` block, how to measure the clip while it streams.
+2. Add the site's URL pattern to `host_permissions`, both `content_scripts` entries and `web_accessible_resources` in `manifest.json`, and the new file ahead of `injector.js` and `content.js` in the two `js` lists.
+3. Add its cases to `tests/sites.test.js`.
+
+The contract is documented at the top of `sites/chatgpt.js`. Hooks that a site does not need (`buttonMount`, `legacyAnchorSelector`, `markNativeUi`, and the `page` measurers) can be left out.
+
 ### Project Structure
 ```
-ChatGPT-web-audio/
+read-aloud-player/
 ├── manifest.json          # Extension manifest
-├── content.js             # Main content script
-├── injector.js            # MAIN-world audio patch
+├── content.js             # Site-agnostic content script: buttons, player, settings
+├── injector.js            # Site-agnostic MAIN-world audio hooks
+├── sites/
+│   ├── chatgpt.js         # ChatGPT adapter
+│   └── grok.js            # Grok adapter
 ├── styles.css             # UI styles
+├── popup.html/.css/.js    # Extension popup: player style, pill position, shortcuts
+├── background.js          # Shows the style picker again after an update
+├── tests/
+│   └── sites.test.js      # Adapter tests (npm test)
 ├── version.js             # Sets the version from the commit count
 ├── icons/                 # Extension icons
-│   ├── icon-source.png
-│   ├── icon16.png
-│   ├── icon32.png
-│   ├── icon48.png
-│   └── icon128.png
 └── README.md              # This file
 ```
 
@@ -101,12 +132,12 @@ ChatGPT-web-audio/
 
 ### Audio Not Playing
 - **Check Console**: Open DevTools (F12) and look for errors
-- **Refresh Page**: Sometimes ChatGPT's UI changes require a page reload
-- **Disable Conflicts**: Try disabling other ChatGPT extensions temporarily
+- **Refresh Page**: Sometimes a site's UI changes require a page reload
+- **Disable Conflicts**: Try disabling other extensions that touch the same site temporarily
 
 ### Button Not Appearing
 - **Wait for Load**: Give the page a moment to fully load
-- **Check Messages**: Only assistant messages have the speaker button
+- **Check Messages**: Only assistant messages with readable text have the speaker button
 - **Refresh**: Try refreshing the page if buttons don't appear
 
 ### Panel Not Showing
@@ -116,12 +147,12 @@ ChatGPT-web-audio/
 
 ### Extension Not Loading
 - **Verify Installation**: Ensure the extension is enabled in `chrome://extensions`
-- **Check Permissions**: Make sure it has access to `chatgpt.com`
+- **Check Permissions**: Make sure it has access to `chatgpt.com` and `grok.com`
 - **Reload Extension**: Click the reload button in `chrome://extensions`
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues and pull requests.
+Contributions are welcome! Please feel free to submit issues and pull requests. New site adapters are especially welcome; see **Adding a site** above.
 
 ### How to Contribute
 1. Fork the repository
@@ -136,17 +167,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- OpenAI for the amazing ChatGPT platform
+- OpenAI and xAI for building Read Aloud into their chat products
 - The Chrome extension community for inspiration and tools
-- Radix UI for the accessible component library that ChatGPT uses
+- Radix UI for the accessible component library both sites use
 
 ## Support
 
 If you encounter any issues or have questions:
-- 🐛 [Report an Issue](https://github.com/ai-armageddon/ChatGPT-web-audio/issues)
-- 💬 [Discussions](https://github.com/ai-armageddon/ChatGPT-web-audio/discussions)
-- 📧 [Email Support](mailto:support@example.com)
+- 🐛 [Report an Issue](https://github.com/ai-armageddon/read-aloud-player/issues)
+- 💬 [Discussions](https://github.com/ai-armageddon/read-aloud-player/discussions)
 
 ---
 
-**Made with ❤️ for the ChatGPT community**
+**Made with ❤️ for people who would rather listen**

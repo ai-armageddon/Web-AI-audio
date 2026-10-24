@@ -1,5 +1,5 @@
 {
-  "name": "chatgpt-web-audio",
+  "name": "read-aloud-player",
   "private": true,
   "description": "Chrome extension: one-click Read Aloud with a floating player on ChatGPT and Grok.",
   "scripts": {

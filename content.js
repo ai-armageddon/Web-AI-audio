@@ -1,4 +1,4 @@
-/* ChatGPT-web-audio — content script
+/* Read Aloud Player — content script
  * 1. Injects a speaker button into playable assistant text response action rows.
  * 2. Clicking it triggers the site's native "Read Aloud" (directly or via the overflow menu).
  * 3. Hijacks the native <audio> element and routes control to a floating, draggable media panel.
@@ -501,7 +501,7 @@
     panel.innerHTML = `
       <div class="cgpt-ah-header">
         <span class="cgpt-ah-grip">${GRIP_SVG}</span>
-        <span class="cgpt-ah-title">ChatGPT Audio</span>
+        <span class="cgpt-ah-title">${SITE.name} Audio</span>
         <button class="cgpt-ah-close" title="Hide panel" aria-label="Hide panel">×</button>
       </div>
       <div class="cgpt-ah-timeline">
