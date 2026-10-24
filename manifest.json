@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT-web-audio",
-  "version": "0.5.0",
-  "description": "Adds one-click Read Aloud controls to playable ChatGPT responses and routes audio to a draggable floating media controller with sticky playback speed.",
+  "version": "0.5.2",
+  "description": "Adds one-click Read Aloud controls to ChatGPT and Grok responses and routes audio to a draggable floating media controller with sticky playback speed.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -23,23 +23,23 @@
     "service_worker": "background.js"
   },
   "permissions": ["storage"],
-  "host_permissions": ["https://chatgpt.com/*"],
+  "host_permissions": ["https://chatgpt.com/*", "https://grok.com/*"],
   "web_accessible_resources": [
     {
       "resources": ["icons/icon128.png"],
-      "matches": ["https://chatgpt.com/*"]
+      "matches": ["https://chatgpt.com/*", "https://grok.com/*"]
     }
   ],
   "content_scripts": [
     {
-      "matches": ["https://chatgpt.com/*"],
-      "js": ["injector.js"],
+      "matches": ["https://chatgpt.com/*", "https://grok.com/*"],
+      "js": ["sites/chatgpt.js", "sites/grok.js", "injector.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://chatgpt.com/*"],
-      "js": ["content.js"],
+      "matches": ["https://chatgpt.com/*", "https://grok.com/*"],
+      "js": ["sites/chatgpt.js", "sites/grok.js", "content.js"],
       "css": ["styles.css"],
       "run_at": "document_idle"
     }

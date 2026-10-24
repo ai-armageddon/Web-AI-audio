@@ -1,8 +1,8 @@
-/* Theme tokens follow ChatGPT's own light/dark class on <html>,
-   so the injected UI always matches the site's current theme. */
+/* Theme tokens follow the site's own light/dark class on <html> (ChatGPT and
+   Grok both toggle `html.dark`), so the injected UI matches the current theme. */
 
 /* Injected Read Aloud button in the message action row. It replaces
-   ChatGPT's own, so it is built to sit among the native actions: same hit
+   the site's own, so it is built to sit among the native actions: same hit
    area, same icon size, and the site's own colour tokens, which makes it
    follow the theme and the user's text size without any rules of ours. */
 .cgpt-audio-hijacker-btn {
@@ -22,7 +22,7 @@
   transition: background-color 0.15s ease, transform 0.1s ease;
 }
 /* Speaker-grille artwork. It is pale, so a hairline shadow keeps its edge
-   visible on ChatGPT's light theme. */
+   visible on a light theme. */
 .cgpt-ah-icon {
   width: 1.5rem;
   height: 1.5rem;
@@ -40,11 +40,14 @@
   outline-offset: 2px;
 }
 
-/* ChatGPT's own Read Aloud button: hidden rather than removed, because our
+/* The site's own Read Aloud button: hidden rather than removed, because our
    button starts playback by clicking it. Its tooltip wrapper goes with it so
-   the row keeps no empty gap. */
+   the row keeps no empty gap. A site's own mini player (Grok shows one above
+   the composer while reading) is tagged by its adapter and hidden the same
+   way; the extension's player takes its place. */
 [data-cgpt-ah-native],
-span:has(> [data-cgpt-ah-native]) {
+span:has(> [data-cgpt-ah-native]),
+[data-cgpt-ah-native-player] {
   display: none !important;
 }
 

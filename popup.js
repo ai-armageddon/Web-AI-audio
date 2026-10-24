@@ -1,6 +1,6 @@
 /* Extension action popup: switch player style + pill position.
- * Writes straight to chrome.storage.local; the content script on chatgpt.com
- * watches storage and swaps the UI live. */
+ * Writes straight to chrome.storage.local; the content script on each
+ * supported site watches storage and swaps the UI live. */
 (() => {
   'use strict';
 
@@ -108,7 +108,7 @@
 
   rerun.addEventListener('click', () => {
     chrome.storage.local.set({ onboardingPending: true }, () => {
-      hint.textContent = 'The style picker will appear on your next ChatGPT page load.';
+      hint.textContent = 'The style picker will appear on your next ChatGPT or Grok page load.';
       hint.hidden = false;
     });
   });

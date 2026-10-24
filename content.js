@@ -1,17 +1,27 @@
 /* ChatGPT-web-audio — content script
  * 1. Injects a speaker button into playable assistant text response action rows.
- * 2. Clicking it triggers OpenAI's native "Read Aloud" (directly or via the overflow menu).
+ * 2. Clicking it triggers the site's native "Read Aloud" (directly or via the overflow menu).
  * 3. Hijacks the native <audio> element and routes control to a floating, draggable media panel.
  * 4. Persists playback speed and panel position in chrome.storage.local.
+ *
+ * Everything that depends on a particular site's DOM comes from the adapter
+ * in sites/ that registered for this hostname; see sites/chatgpt.js for the
+ * contract. This file never names a site.
  */
 (() => {
   'use strict';
 
+  const host = location.hostname;
+  const SITE = (globalThis.__ahSites || []).find((s) =>
+    s.hosts.some((h) => host === h || host.endsWith(`.${h}`))
+  );
+  if (!SITE) return;
+
   const BTN_CLASS = 'cgpt-audio-hijacker-btn';
   const NATIVE_BTN_ATTR = 'data-cgpt-ah-native';
-  // The native button's label follows its state: "Read aloud",
-  // "Loading audio…", then "Stop reading aloud" while playing.
-  const NATIVE_READ_ALOUD_LABEL = /read(ing)? aloud|loading audio/i;
+  const NATIVE_PLAYER_ATTR = 'data-cgpt-ah-native-player';
+  // Handed to adapter hooks that must tell the site's elements from ours.
+  const SITE_CTX = { btnClass: BTN_CLASS, nativeBtnAttr: NATIVE_BTN_ATTR };
   const PANEL_ID = 'cgpt-audio-hijacker-panel';
   const SPEED_OPTIONS = [1, 1.25, 1.5, 1.75, 2];
   const DEFAULT_SPEED = 1.5;
@@ -41,22 +51,8 @@
   // Browser zoom reduces the CSS viewport, just like a small window. Keep a
   // reachable transport when the response actions or saved panel no longer fit.
   const COMPACT_VIEWPORT = window.matchMedia('(max-width: 768px), (max-height: 480px)');
-  // ChatGPT currently serves two conversation renderers. The classic one uses
-  // `.turn-action-controls`; the newer renderer exposes a semantic Response
-  // actions group. Keep both here so DOM changes stay isolated to discovery.
-  const ACTION_ROW_SELECTOR = [
-    '[data-assistant-message-actions]',
-    '[data-message-actions][aria-label*="response action" i]',
-    '[role="group"][aria-label*="response action" i]',
-    '.turn-action-controls',
-  ].join(', ');
-  const TURN_SELECTOR = [
-    '[data-testid^="conversation-turn"]',
-    'article',
-    'li[data-message-role]',
-    '[data-message-author-role]',
-    '[data-turn]',
-  ].join(', ');
+  const ACTION_ROW_SELECTOR = SITE.actionRowSelector;
+  const TURN_SELECTOR = SITE.turnSelector;
 
   let preferredSpeed = DEFAULT_SPEED;
   let activeAudio = null;
@@ -134,7 +130,7 @@
 
   /* ---------------- native Read Aloud trigger ---------------- */
 
-  // Radix UI buttons/menus on chatgpt.com often ignore plain .click();
+  // Radix UI buttons/menus often ignore plain .click();
   // dispatch a full pointer-event sequence instead.
   function simulateClick(el) {
     const opts = { bubbles: true, cancelable: true, composed: true, view: window };
@@ -147,29 +143,10 @@
   }
 
   function findNativeReadAloudButton(scope) {
-    // Direct button in the action row (present on wider layouts).
-    // Never match our own injected button.
-    return (
-      scope.querySelector(
-        `button[data-testid="voice-play-turn-action-button"]:not(.${BTN_CLASS})`
-      ) ||
-      Array.from(scope.querySelectorAll(`button:not(.${BTN_CLASS})`)).find((b) =>
-        NATIVE_READ_ALOUD_LABEL.test(b.getAttribute('aria-label') || '')
-      ) ||
-      null
-    );
+    return SITE.findNativeReadAloudButton(scope, SITE_CTX);
   }
 
-  // The native button is a toggle, so once the site considers a turn to be
-  // playing another click on it stops playback instead of starting it.
-  function isNativePlaying(button) {
-    return (
-      button.getAttribute('aria-pressed') === 'true' ||
-      /stop/i.test(button.getAttribute('aria-label') || '')
-    );
-  }
-
-  // Our button replaces ChatGPT's own. The native one has to stay in the DOM
+  // Our button replaces the site's own. The native one has to stay in the DOM
   // (clicking it is how playback starts), so tag it and let styles.css hide it;
   // the tag survives the label changing between its states.
   function hideNativeReadAloud(row) {
@@ -177,20 +154,17 @@
     if (native && !native.hasAttribute(NATIVE_BTN_ATTR)) native.setAttribute(NATIVE_BTN_ATTR, '');
   }
 
-  function findOverflowButton(scope) {
-    return (
-      scope.querySelector('button[data-testid="more-actions-button"]') ||
-      scope.querySelector('button[aria-label*="more" i][aria-haspopup]') ||
-      Array.from(scope.querySelectorAll('button[aria-haspopup="menu"]')).pop() ||
-      null
-    );
+  // Some sites show a player of their own while reading. The adapter tags it
+  // and styles.css hides it, the same way as the native button.
+  function hideNativePlayer(root) {
+    SITE.markNativeUi?.(root, NATIVE_PLAYER_ATTR);
   }
 
   function clickMenuItemReadAloud() {
     // Radix menus render in a portal at document.body level.
     const items = document.querySelectorAll('[role="menuitem"], [role="option"]');
     for (const item of items) {
-      if (/read aloud/i.test(item.textContent || '')) {
+      if (SITE.readAloudMenuItem.test(item.textContent || '')) {
         simulateClick(item);
         return true;
       }
@@ -208,7 +182,7 @@
     }
 
     // Fall back: open the three-dot overflow menu, then click "Read aloud".
-    const overflow = findOverflowButton(scope);
+    const overflow = SITE.findOverflowButton(scope);
     if (!overflow) return;
     simulateClick(overflow);
 
@@ -275,79 +249,13 @@
   const sourceText = (element) => element.textContent || '';
 
   function assistantContentText(row, turn, textOf = renderedText) {
-    // Older turns put the role on the message body; the newer list renderer
-    // puts the role on the <li> and marks its Markdown body explicitly.
-    const content = turn?.querySelector(
-      '[data-assistant-markdown], [data-message-author-role="assistant"]'
-    );
-    const contentText = content ? textOf(content).trim() : '';
-    if (contentText) return contentText;
-
-    // The current signed-in renderer groups a user prompt and assistant reply
-    // into one turn. Its assistant attribution is a sibling of the response
-    // body, while the action row sits just after that message block.
-    const actionOwner = row.parentElement;
-    const attribution = actionOwner?.querySelector('[data-conversation-role="assistant"]');
-    if (attribution?.parentElement) {
-      const text = Array.from(attribution.parentElement.children)
-        .filter((element) => element !== attribution)
-        .map(textOf)
-        .join(' ')
-        .trim();
-      if (text) return text;
-    }
-
-    // Some variants expose only the role on the turn. Remove the accessible
-    // attribution before checking its text so an empty/image-only response is
-    // not mistaken for readable content.
-    const role = (
-      turn?.getAttribute('data-message-role') ||
-      turn?.getAttribute('data-turn') ||
-      turn?.getAttribute('data-message-author-role') ||
-      ''
-    ).toLowerCase();
-    if (role === 'assistant') {
-      return Array.from(turn.children)
-        .filter((element) =>
-          element !== row &&
-          !element.matches(ACTION_ROW_SELECTOR) &&
-          !element.matches('[data-message-attribution], [data-conversation-role="assistant"]')
-        )
-        .map(textOf)
-        .join(' ')
-        .replace(/^\s*chatgpt said:\s*/i, '')
-        .trim();
-    }
-    return '';
+    return SITE.assistantContentText(row, turn, textOf) || '';
   }
 
   // Whether the row belongs to an assistant turn, judged from its structure
   // alone and not from what the turn currently says.
   function isAssistantRowShape(row) {
-    if (!row) return false;
-
-    const turn = row.closest(TURN_SELECTOR);
-    const turnRole = (
-      turn?.getAttribute('data-message-role') ||
-      turn?.getAttribute('data-turn') ||
-      turn?.getAttribute('data-message-author-role') ||
-      ''
-    ).toLowerCase();
-    if (turnRole && turnRole !== 'assistant') return false;
-
-    const explicitlyAssistant =
-      row.hasAttribute('data-assistant-message-actions') ||
-      /response action/i.test(row.getAttribute('aria-label') || '') ||
-      Boolean(row.querySelector([
-        'button[data-testid="copy-turn-action-button"]',
-        'button[data-testid="voice-play-turn-action-button"]',
-        'button[aria-label="Copy response" i]',
-        'button[aria-label="Copy" i]',
-        'button[aria-label="Rate response" i]',
-        'button[aria-label="Regenerate response" i]',
-        `button[${NATIVE_BTN_ATTR}]`,
-      ].join(', ')));
-    return explicitlyAssistant;
+    return Boolean(row) && SITE.isAssistantRowShape(row, SITE_CTX);
   }
 
   function isAssistantActionRow(row) {
@@ -377,15 +285,16 @@
     if (containingRow) rows.add(containingRow);
     root.querySelectorAll?.(ACTION_ROW_SELECTOR).forEach((row) => rows.add(row));
 
-    // Compatibility fallback for the original renderer, whose action row had
-    // no stable attribute of its own and was located through the Copy button.
-    const legacyAnchorSelector =
-      'button[data-testid="copy-turn-action-button"], button[aria-label="Copy response" i]';
-    const legacyAnchors = [
-      ...(root.matches?.(legacyAnchorSelector) ? [root] : []),
-      ...(root.querySelectorAll?.(legacyAnchorSelector) || []),
-    ];
-    legacyAnchors.forEach((button) => rows.add(button.parentElement));
+    // Some renderers give the action row no stable attribute of its own; the
+    // adapter then names a button whose parent is the row.
+    const legacyAnchorSelector = SITE.legacyAnchorSelector;
+    if (legacyAnchorSelector) {
+      const legacyAnchors = [
+        ...(root.matches?.(legacyAnchorSelector) ? [root] : []),
+        ...(root.querySelectorAll?.(legacyAnchorSelector) || []),
+      ];
+      legacyAnchors.forEach((button) => rows.add(button.parentElement));
+    }
     return rows;
   }
 
@@ -396,7 +305,7 @@
       rows.delete(row);
       if (hasUnrenderedText(row)) continue;
       // Clean up a button injected before a turn's role/content was available,
-      // or when ChatGPT reuses DOM while navigating between conversations.
+      // or when the site reuses DOM while navigating between conversations.
       row?.querySelector(`.${BTN_CLASS}`)?.remove();
       row?.querySelector(`[${NATIVE_BTN_ATTR}]`)?.removeAttribute(NATIVE_BTN_ATTR);
     }
@@ -416,15 +325,15 @@
       e.stopPropagation();
       // This turn is already loaded (playing or paused): resume or pause it
       // rather than clicking the native toggle, which would stop it.
-      const native = findNativeReadAloudButton(row);
-      if (native && isNativePlaying(native) && activeAudio?.hasAttribute('src')) {
+      if (activeAudio && SITE.rowOwnsAudio(row, activeAudio, SITE_CTX)) {
         togglePlay();
         return;
       }
       setBtnLoading(btn);
       triggerReadAloud(row);
     });
-    row.insertBefore(btn, row.firstChild);
+    const mount = SITE.buttonMount?.(row) || row;
+    mount.insertBefore(btn, mount.firstChild);
   }
 
   function scanAndInject(root) {
@@ -432,6 +341,7 @@
       injectButton(row);
       hideNativeReadAloud(row);
     });
+    hideNativePlayer(root);
   }
 
   // Page-wide pass that only ever adds: rows that already carry our button are
@@ -445,6 +355,7 @@
       }
       hideNativeReadAloud(row);
     }
+    hideNativePlayer(document.body);
   }
 
   /* ---------------- audio hijacking ---------------- */
@@ -454,7 +365,7 @@
     audio.dataset.cgptHijacked = '1';
 
     activeAudio = audio;
-    audio.controls = false; // keep OpenAI's layout hidden
+    audio.controls = false; // keep the site's layout hidden
     applyPreferredSpeed(audio);
     bindAudioToPanel(audio);
     if (!audio.paused) {
@@ -1006,10 +917,10 @@
   }
 
   function findComposer() {
-    return document.querySelector('#prompt-textarea, textarea, [contenteditable="true"][role="textbox"]');
+    return SITE.findComposer();
   }
 
-  // ChatGPT centers the composer inside the conversation column, so its box is
+  // Sites center the composer inside the conversation column, so its box is
   // the best proxy for "the middle of the chat" — unlike the viewport center it
   // moves when the sidebar opens or closes.
   function composerRect() {
@@ -1021,7 +932,7 @@
   // Re-centre whenever the conversation column resizes (sidebar toggles,
   // canvas opens) instead of waiting for the slow polling fallback.
   function observeChatResize() {
-    const target = document.querySelector('main');
+    const target = SITE.chatColumn();
     if (!target || target === pillResizeTarget) return;
     if (!pillResizeObserver) pillResizeObserver = new ResizeObserver(() => positionPill());
     pillResizeObserver.disconnect();
@@ -1054,7 +965,7 @@
       pillDock.style.top = `${cy}px`;
       return;
     }
-    const column = composer || document.querySelector('main')?.getBoundingClientRect() || null;
+    const column = composer || SITE.chatColumn()?.getBoundingClientRect() || null;
     const vw = window.innerWidth;
     const centerX = column ? column.left + column.width / 2 : vw / 2;
 
