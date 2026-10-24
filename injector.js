@@ -62,6 +62,93 @@
     };
   }
 
+  // ChatGPT appends Read Aloud to its MediaSource a little ahead of the
+  // playhead, so the element reports an infinite duration until the last
+  // chunk is in, most of the way through playback. The download itself
+  // finishes within seconds, and it is a plain ADTS stream whose frames each
+  // hold a fixed number of samples, so the real length can be counted from
+  // the response and handed to the content script on the element.
+  const SYNTHESIZE_PATH = '/backend-api/synthesize';
+  const DURATION_ATTR = 'data-cgpt-ah-duration';
+  const ADTS_SAMPLE_RATES = [
+    96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
+  ];
+  const ADTS_HEADER_BYTES = 7;
+  const SAMPLES_PER_AAC_BLOCK = 1024;
+
+  function adtsDurationSeconds(bytes) {
+    let samples = 0;
+    let sampleRate = 0;
+    let i = 0;
+    while (i + ADTS_HEADER_BYTES <= bytes.length) {
+      const isFrameStart = bytes[i] === 0xff && (bytes[i + 1] & 0xf6) === 0xf0;
+      const frameBytes = isFrameStart
+        ? ((bytes[i + 3] & 0x03) << 11) | (bytes[i + 4] << 3) | (bytes[i + 5] >> 5)
+        : 0;
+      const rate = isFrameStart ? ADTS_SAMPLE_RATES[(bytes[i + 2] >> 2) & 0x0f] : 0;
+      if (frameBytes < ADTS_HEADER_BYTES || !rate) {
+        i += 1;
+        continue;
+      }
+      sampleRate = rate;
+      samples += ((bytes[i + 6] & 0x03) + 1) * SAMPLES_PER_AAC_BLOCK;
+      i += frameBytes;
+    }
+    return sampleRate ? samples / sampleRate : 0;
+  }
+
+  // Only one Read Aloud plays at a time, so the latest download belongs to
+  // the latest MediaSource-backed element. Each side is tied to the other
+  // once, by source URL, so a finished download is never applied to the next
+  // clip when the site reuses its element.
+  let synth = null;
+  let streamAudio = null;
+  const linkedSrcs = new Set();
+
+  function syncDuration() {
+    if (!streamAudio) return;
+    const src = streamAudio.currentSrc || streamAudio.src;
+    if (synth && !synth.src && src && !linkedSrcs.has(src)) {
+      synth.src = src;
+      linkedSrcs.add(src);
+    }
+    if (synth && synth.src === src && synth.seconds > 0) {
+      streamAudio.setAttribute(DURATION_ATTR, String(synth.seconds));
+    } else {
+      streamAudio.removeAttribute(DURATION_ATTR);
+    }
+  }
+
+  if (typeof window.fetch === 'function') {
+    const origFetch = window.fetch;
+    window.fetch = function (...args) {
+      const request = origFetch.apply(this, args);
+      try {
+        const url = String(args[0]?.url ?? args[0]);
+        if (url.includes(SYNTHESIZE_PATH)) {
+          const download = { src: null, seconds: 0 };
+          synth = download;
+          syncDuration();
+          // The site receives the untouched promise; this reads a clone taken
+          // before the site's own handler can consume the body.
+          request
+            .then((response) => (response.ok ? response.clone().arrayBuffer() : null))
+            .then((buffer) => {
+              if (!buffer) return;
+              download.seconds = adtsDurationSeconds(new Uint8Array(buffer));
+              if (download === synth) syncDuration();
+            })
+            .catch(() => {
+              /* an aborted or failed download just leaves the length unknown */
+            });
+        }
+      } catch (_) {
+        /* never break the site's request */
+      }
+      return request;
+    };
+  }
+
   // Once Read Aloud starts, ChatGPT assigns `audio.onpause` a handler that
   // tears playback down (aborts the stream, clears `src`, rewinds to zero), so
   // a pause from the extension's controls left nothing to resume. The site
@@ -101,7 +188,11 @@
 
       if (this.tagName === 'AUDIO') {
         const mediaSource = mediaSourcesByUrl.get(this.currentSrc || this.src);
-        if (mediaSource) audioByMediaSource.set(mediaSource, this);
+        if (mediaSource) {
+          audioByMediaSource.set(mediaSource, this);
+          streamAudio = this;
+          syncDuration();
+        }
       }
     } catch (_) {
       /* never break playback */

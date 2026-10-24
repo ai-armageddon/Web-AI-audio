@@ -32,9 +32,15 @@
   // not sit on top of the composer or the message action row.
   const PILL_GAP = 6;
   const RESCAN_DELAY_MS = 150;
+  // Set by injector.js on a streamed <audio> once its real length is known.
+  const DURATION_ATTR = 'data-cgpt-ah-duration';
+  const UNKNOWN_TIME = '--:--';
   const RING_R = 23;
   const RING_C = 2 * Math.PI * RING_R;
   const FINE_POINTER = window.matchMedia('(hover: hover) and (pointer: fine)');
+  // Browser zoom reduces the CSS viewport, just like a small window. Keep a
+  // reachable transport when the response actions or saved panel no longer fit.
+  const COMPACT_VIEWPORT = window.matchMedia('(max-width: 768px), (max-height: 480px)');
   // ChatGPT currently serves two conversation renderers. The classic one uses
   // `.turn-action-controls`; the newer renderer exposes a semantic Response
   // actions group. Keep both here so DOM changes stay isolated to discovery.
@@ -122,7 +128,8 @@
   }
 
   function savePosition(top, left) {
-    chrome.storage.local.set({ [STORAGE_KEYS.pos]: { top, left } });
+    savedPanelPos = { top, left };
+    chrome.storage.local.set({ [STORAGE_KEYS.pos]: savedPanelPos });
   }
 
   /* ---------------- native Read Aloud trigger ---------------- */
@@ -501,6 +508,11 @@
     audio.addEventListener('ratechange', onRateChange);
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('emptied', onEnded);
+    // The streamed length arrives on its own schedule, possibly while paused.
+    new MutationObserver(onTime).observe(audio, {
+      attributes: true,
+      attributeFilter: [DURATION_ATTR],
+    });
   }
 
   function hijackExistingAudio(root) {
@@ -546,18 +558,28 @@
     ui.loopBtn.setAttribute('title', enabled ? 'Loop playback on' : 'Loop playback off');
   }
 
+  // Read Aloud is streamed, so the element reports an infinite duration for
+  // most of playback. injector.js works the real length out from the download
+  // and leaves it on the element; until that lands the length is unknown.
+  function totalDuration(audio) {
+    if (Number.isFinite(audio.duration) && audio.duration > 0) return audio.duration;
+    const streamed = parseFloat(audio.getAttribute(DURATION_ATTR));
+    return Number.isFinite(streamed) && streamed > 0 ? streamed : null;
+  }
+
   function updateTimeline() {
     if (!activeAudio || !ui.scrubber) return;
-    const { currentTime, duration } = activeAudio;
+    const { currentTime } = activeAudio;
+    const duration = totalDuration(activeAudio);
+    const progress = duration ? Math.min(1, currentTime / duration) : 0;
     ui.current.textContent = fmtTime(currentTime);
-    ui.total.textContent = fmtTime(duration);
-    if (isFinite(duration) && duration > 0 && !ui.scrubber.matches(':active')) {
-      const pct = (currentTime / duration) * 100;
+    ui.total.textContent = duration ? fmtTime(duration) : UNKNOWN_TIME;
+    if (!ui.scrubber.matches(':active')) {
+      const pct = progress * 100;
       ui.scrubber.value = String(pct);
       ui.scrubber.style.setProperty('--ah-pct', `${pct}%`);
     }
     if (pillUi.ringFg) {
-      const progress = isFinite(duration) && duration > 0 ? currentTime / duration : 0;
       pillUi.ringFg.style.strokeDashoffset = String(RING_C * (1 - progress));
     }
   }
@@ -653,7 +675,18 @@
   }
 
   function togglePlay() {
-    if (!activeAudio) return;
+    if (!activeAudio || !(activeAudio.currentSrc || activeAudio.getAttribute('src'))) {
+      const rows = Array.from(candidateRows(document.body)).filter((row) =>
+        isAssistantActionRow(row) || hasUnrenderedText(row)
+      );
+      const row = rows[rows.length - 1];
+      if (row) {
+        const button = row.querySelector(`.${BTN_CLASS}`);
+        if (button) setBtnLoading(button);
+        triggerReadAloud(row);
+      }
+      return;
+    }
     if (activeAudio.paused) activeAudio.play();
     else activeAudio.pause();
   }
@@ -761,34 +794,38 @@
     ui.scrubber.addEventListener('input', () => {
       // Keep the progress fill in sync while dragging.
       ui.scrubber.style.setProperty('--ah-pct', `${ui.scrubber.value}%`);
-      if (activeAudio && Number.isFinite(activeAudio.duration) && activeAudio.duration > 0) {
-        seekTo((parseFloat(ui.scrubber.value) / 100) * activeAudio.duration);
-      }
+      const duration = activeAudio && totalDuration(activeAudio);
+      if (duration) seekTo((parseFloat(ui.scrubber.value) / 100) * duration);
     });
     ui.closeBtn.addEventListener('click', hidePanel);
   }
 
   /* ---------------- micro pill player ---------------- */
 
+  function usesPill() {
+    return COMPACT_VIEWPORT.matches || uiMode === 'pill';
+  }
+
   function activeUiRoot() {
-    return uiMode === 'pill' ? pillDock : panel;
+    return usesPill() ? pillDock : panel;
   }
 
   function showPanel() {
     const root = activeUiRoot();
     if (!root) return;
     root.classList.add('cgpt-ah-visible');
-    if (uiMode === 'pill') {
+    if (usesPill()) {
       startPillPositioning();
       refreshPillExpanded();
     }
   }
 
   function hidePanel() {
+    if (COMPACT_VIEWPORT.matches) return;
     const root = activeUiRoot();
     if (!root) return;
     root.classList.remove('cgpt-ah-visible');
-    if (uiMode === 'pill') {
+    if (usesPill()) {
       pillHovered = false;
       pillPinned = false;
       setPillExpanded(false);
@@ -797,6 +834,7 @@
   }
 
   function applyUiMode() {
+    const wasVisible = (panel || pillDock)?.classList.contains('cgpt-ah-visible');
     stopPillPositioning();
     if (panel) {
       panel.remove();
@@ -815,18 +853,15 @@
     ui = {};
     pillUi = {};
 
-    if (uiMode === 'pill') buildPill();
+    if (usesPill()) buildPill();
     else buildPanel(savedPanelPos);
 
     // Re-sync the fresh UI with whatever the audio is doing right now.
     updateSpeedBtn();
     updateTimeline();
-    if (activeAudio && !activeAudio.paused) {
-      setPlayIcon(false);
-      showPanel();
-    } else {
-      setPlayIcon(true);
-    }
+    setPlayIcon(!isPlaying());
+    updateLoopBtn();
+    if (COMPACT_VIEWPORT.matches || isPlaying() || (wasVisible && activeAudio)) showPanel();
   }
 
   function buildPill() {
@@ -836,6 +871,7 @@
       pillPosition === 'top' ? 'cgpt-ah-pos-top' : 'cgpt-ah-pos-bottom',
       `cgpt-ah-pill-size-${pillSize}`
     );
+    pillDock.classList.toggle('cgpt-ah-compact-viewport', COMPACT_VIEWPORT.matches);
     // The expanded row is a 1fr / auto / 1fr grid so the play button lands on
     // the pill's exact center — the same point the collapsed ball occupies.
     // Hovering therefore grows the pill *around* the pointer instead of moving
@@ -935,8 +971,8 @@
   // The pill stays open while audio plays (transport always one click away),
   // while it is hovered, and while a touch user has tapped it open.
   function refreshPillExpanded() {
-    if (uiMode !== 'pill' || !pillDock) return;
-    setPillExpanded(pillPosition === 'top' || pillHovered || pillPinned || isPlaying());
+    if (!usesPill() || !pillDock) return;
+    setPillExpanded(COMPACT_VIEWPORT.matches || pillPosition === 'top' || pillHovered || pillPinned || isPlaying());
   }
 
   function setPillExpanded(expanded) {
@@ -1000,6 +1036,24 @@
     const height =
       parseFloat(getComputedStyle(pillUi.pill).getPropertyValue('--ah-pill-height')) || 64;
     const composer = composerRect();
+    if (COMPACT_VIEWPORT.matches) {
+      const viewport = window.visualViewport;
+      const left = viewport?.offsetLeft || 0;
+      const top = viewport?.offsetTop || 0;
+      const width = Math.max(0, Math.min(PILL_MAX_WIDTH, (viewport?.width || window.innerWidth) - 16));
+      const bottom = top + (viewport?.height || window.innerHeight);
+      // Stay above the composer where possible; clamp both edges when zoom
+      // pushes it outside the visible viewport or it grows taller than usual.
+      const cy = Math.max(top + height / 2 + 8, Math.min(
+        (composer?.top ?? bottom) - PILL_GAP - height / 2,
+        bottom - height / 2 - 8
+      ));
+      pillDock.classList.add('cgpt-ah-pill-compact');
+      pillDock.style.setProperty('--ah-pill-w', `${width}px`);
+      pillDock.style.left = `${left + (viewport?.width || window.innerWidth) / 2}px`;
+      pillDock.style.top = `${cy}px`;
+      return;
+    }
     const column = composer || document.querySelector('main')?.getBoundingClientRect() || null;
     const vw = window.innerWidth;
     const centerX = column ? column.left + column.width / 2 : vw / 2;
@@ -1142,9 +1196,9 @@
       if (newMode && newMode !== uiMode) {
         uiMode = newMode;
         applyUiMode();
-      } else if (posChange && uiMode === 'pill') {
+      } else if (posChange && usesPill()) {
         applyPillPositionMode();
-      } else if (sizeChange && uiMode === 'pill') {
+      } else if (sizeChange && usesPill()) {
         applyPillSize();
       }
     });
@@ -1297,6 +1351,7 @@
     pillSize = settings.pillSize || 'medium';
     keyboardShortcuts = { ...keyboardShortcuts, ...settings.shortcuts };
     applyUiMode();
+    COMPACT_VIEWPORT.addEventListener('change', applyUiMode);
     scanAndInject(document.body);
     hijackExistingAudio(document.body);
     startObserver();

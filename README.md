@@ -8,6 +8,7 @@ A Chrome extension that supercharges ChatGPT's Read Aloud feature with a beautif
 
 - **One-Click Access** - Speaker button injected into assistant responses with readable text (no more digging through menus!)
 - **Floating Media Controller** - Sleek, draggable panel with full playback controls
+- **Zoom-Friendly Player** - An always-visible bottom player takes over in narrow or short windows; Play starts the latest reply when no audio is loaded
 - **Smart Audio Hijacking** - Intercepts OpenAI's native audio stream for seamless control
 - **Playback Speed Control** - Click the speed pill to cycle 1x, 1.25x, 1.5x, 1.75x, or 2x (persists across sessions)
 - **Position Memory** - Panel remembers where you dragged it (even after page reload)
@@ -110,6 +111,7 @@ ChatGPT-web-audio/
 
 ### Panel Not Showing
 - **Start Audio**: The panel only appears when audio is actively playing
+- **Zoomed-In Layouts**: At viewport widths of 768px or less, or heights of 480px or less, an expanded bottom player stays visible even before playback. Your selected player style returns when the window has more room.
 - **Check Position**: The panel might be off-screen - drag it back into view
 
 ### Extension Not Loading

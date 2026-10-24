@@ -710,6 +710,36 @@ html.dark #cgpt-ah-pilldock .cgpt-ah-pill {
   opacity: 1;
 }
 
+/* Zoomed/narrow windows always have an expanded bottom transport. Keep the
+   essential controls reachable even when the saved player style is a panel. */
+#cgpt-ah-pilldock.cgpt-ah-compact-viewport {
+  transition: none;
+}
+#cgpt-ah-pilldock.cgpt-ah-compact-viewport .cgpt-ah-pill {
+  --ah-pill-height: 56px;
+  --ah-btn: 32px;
+  --ah-btn-sm: 27px;
+  --ah-bar: 7px;
+  box-sizing: border-box;
+}
+#cgpt-ah-pilldock.cgpt-ah-compact-viewport .cgpt-ah-close {
+  display: none;
+}
+@media (max-width: 360px) {
+  #cgpt-ah-pilldock.cgpt-ah-compact-viewport .cgpt-ah-pill-time,
+  #cgpt-ah-pilldock.cgpt-ah-compact-viewport .cgpt-ah-loop {
+    display: none;
+  }
+  #cgpt-ah-pilldock.cgpt-ah-compact-viewport .cgpt-ah-pill-controls {
+    grid-template-columns: 1fr auto;
+    gap: 4px;
+    padding: 0 8px;
+  }
+  #cgpt-ah-pilldock.cgpt-ah-compact-viewport .cgpt-ah-pill-side-end {
+    display: none;
+  }
+}
+
 /* ================= Onboarding style picker ================= */
 
 #cgpt-ah-onboard {
